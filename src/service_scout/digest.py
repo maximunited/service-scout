@@ -18,7 +18,10 @@ def flush_digest(session: Session, cfg: ScoutConfig) -> int:
     if not cfg.digest.enabled:
         return 0
     rows = session.scalars(
-        select(DigestQueueItem).where(DigestQueueItem.flushed == 0).limit(cfg.digest.max_items)
+        select(DigestQueueItem)
+        .where(DigestQueueItem.flushed == 0)
+        .order_by(DigestQueueItem.created_at.asc())
+        .limit(cfg.digest.max_items)
     ).all()
     if not rows:
         log.info("digest_empty")

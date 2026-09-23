@@ -69,7 +69,9 @@ def evaluate_candidate(
     known_sources: list[str],
     initial_queries: list[str],
     dry_run: bool,
-) -> str:
+) -> tuple[str, int]:
+    """Return (notion_verdict_or_skip, tavily_credits_spent_in_this_candidate)."""
+    credits_here = 0
     if is_force_rejected(url, cfg.overrides):
         forced = AgentVerdict(
             name=name,
@@ -98,13 +100,13 @@ def evaluate_candidate(
             validation_error="",
             dry_run=dry_run,
         )
-        return "reject"
+        return "reject", credits_here
 
     sid = resolve_service_id(session, name=name, url=url, overrides=cfg.overrides)
     existing = session.get(NotionLink, sid)
     if existing and existing.scout_verdict == "reject" and cfg.notion.on_revisit == "skip":
         log.info("skip_rejected service_id=%s", sid)
-        return "skip"
+        return "skip", credits_here
 
     few = _few_shot_from_agdr(session)
     tool_calls: list[dict] = []
@@ -147,7 +149,7 @@ def evaluate_candidate(
             validation_error=err or "invalid_agent_output",
             dry_run=dry_run,
         )
-        return "reject"
+        return "reject", credits_here
 
     esc = cfg.tavily.escalation
     rounds = 0
@@ -168,7 +170,8 @@ def evaluate_candidate(
                 )
                 extra_hits: list[SearchHit] = []
                 for q in qs[: esc.max_extra_per_candidate or 1]:
-                    if not governor.can_spend(credit_cost(depth)):
+                    cost = credit_cost(depth)
+                    if not governor.can_spend(cost):
                         break
                     try:
                         extra_hits.extend(
@@ -179,7 +182,8 @@ def evaluate_candidate(
                                 search_depth=depth,
                             )
                         )
-                        governor.record_spend(credit_cost(depth), escalation=True)
+                        governor.record_spend(cost, escalation=True)
+                        credits_here += cost
                         tool_calls.append({"tool": "tavily_search", "query": q, "escalation": True})
                         queries_run.append(q)
                     except Exception as exc:  # noqa: BLE001
@@ -225,7 +229,7 @@ def evaluate_candidate(
         validation_error=err,
         dry_run=dry_run,
     )
-    return notion_verdict
+    return notion_verdict, credits_here
 
 
 def run_target_lane(
@@ -241,108 +245,121 @@ def run_target_lane(
     session.add(run)
     session.commit()
 
-    governor = Governor(cfg, session)
-    registry = load_gap_registry(cfg, target)
-    known = list(registry.get("known_sources") or [])
-    lane_result = run_lane(lane, registry, cfg, governor)
-
-    summary = {
+    summary: dict = {
         "run_id": run_id,
         "lane": lane,
         "target": target.id,
-        "blocked_reason": lane_result.get("blocked_reason"),
-        "partial_failures": lane_result.get("partial_failures"),
+        "blocked_reason": None,
+        "partial_failures": [],
         "verdicts": [],
         "credits_spent": 0,
     }
 
-    if lane_result.get("blocked_reason") and not lane_result.get("queries"):
-        run.status = "blocked"
-        run.detail = lane_result["blocked_reason"] or ""
-        run.finished_at = datetime.now(timezone.utc)
-        session.commit()
-        return summary
+    try:
+        governor = Governor(cfg, session)
+        registry = load_gap_registry(cfg, target)
+        known = list(registry.get("known_sources") or [])
+        lane_result = run_lane(lane, registry, cfg, governor)
 
-    if not governor.allow_lane_credits(lane_result.get("credits_reserved") or 0):
-        # Still allow RSS-only infra (credits_reserved 0)
-        if (lane_result.get("credits_reserved") or 0) > 0:
-            run.status = "budget_blocked"
-            run.finished_at = datetime.now(timezone.utc)
-            session.commit()
-            summary["blocked_reason"] = "budget"
+        summary["blocked_reason"] = lane_result.get("blocked_reason")
+        summary["partial_failures"] = lane_result.get("partial_failures")
+
+        if lane_result.get("blocked_reason") and not lane_result.get("queries"):
+            run.status = "blocked"
+            run.detail = lane_result["blocked_reason"] or ""
             return summary
 
-    all_hits: list[SearchHit] = []
-    queries_done: list[str] = []
-    depth = cfg.tavily.search_depth if cfg.tavily.search_depth in ("basic", "advanced") else "basic"
-    if cfg.tavily.escalation.allow_research_endpoint:
-        log.warning("allow_research_endpoint ignored — not used")
+        if not governor.allow_lane_credits(lane_result.get("credits_reserved") or 0):
+            # Still allow RSS-only infra (credits_reserved 0)
+            if (lane_result.get("credits_reserved") or 0) > 0:
+                run.status = "budget_blocked"
+                summary["blocked_reason"] = "budget"
+                return summary
 
-    for q in lane_result.get("queries") or []:
-        qtext = q["text"]
-        source = q.get("source") or "gap_seed"
-        if source == "rss":
-            # Query text embeds title+url from RSS — synthesize a hit
-            parts = qtext.rsplit(" ", 1)
-            url = parts[-1] if parts and parts[-1].startswith("http") else ""
-            title = qtext[:200]
-            if url:
-                all_hits.append(SearchHit(title=title, url=url, content="rss"))
-            queries_done.append(qtext)
-            continue
-        cost = credit_cost(depth)
-        if not governor.can_spend(cost):
-            log.info("stop_queries_budget")
-            break
-        try:
-            hits = tavily_search(
-                api_key=cfg.tavily.api_key,
-                query=qtext,
-                max_results=cfg.tavily.max_results,
-                search_depth=depth,
-            )
-            governor.record_spend(cost)
-            summary["credits_spent"] = summary.get("credits_spent", 0) + cost
-            all_hits.extend(hits)
-            queries_done.append(qtext)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("search_failed q=%s err=%s", qtext[:60], exc)
-
-    clusters = _cluster_hits(all_hits, lane)
-    # Cap candidates per run
-    for name, url, snippets in clusters[:8]:
-        # Skip known rejected research URLs loosely
-        rejected = registry.get("rejected_research") or []
-        if any(normalize_domain(r.get("url", "")) == normalize_domain(url) for r in rejected):
-            log.info("skip_known_rejected %s", url)
-            continue
-        v = evaluate_candidate(
-            session,
-            cfg,
-            target,
-            governor,
-            run_id=run_id,
-            lane=lane,
-            name=name,
-            url=url,
-            snippets=snippets,
-            known_sources=known,
-            initial_queries=queries_done,
-            dry_run=dry_run,
+        all_hits: list[SearchHit] = []
+        queries_done: list[str] = []
+        depth = (
+            cfg.tavily.search_depth
+            if cfg.tavily.search_depth in ("basic", "advanced")
+            else "basic"
         )
-        summary["verdicts"].append({"name": name, "url": url, "verdict": v})
+        if cfg.tavily.escalation.allow_research_endpoint:
+            log.warning("allow_research_endpoint ignored — not used")
 
-    run.status = "ok"
-    run.credits_spent = int(summary.get("credits_spent") or 0)
-    run.finished_at = datetime.now(timezone.utc)
-    run.detail = f"verdicts={len(summary['verdicts'])}"
-    session.commit()
+        for q in lane_result.get("queries") or []:
+            qtext = q["text"]
+            source = q.get("source") or "gap_seed"
+            if source == "rss":
+                parts = qtext.rsplit(" ", 1)
+                url = parts[-1] if parts and parts[-1].startswith("http") else ""
+                title = qtext[:200]
+                if url:
+                    all_hits.append(SearchHit(title=title, url=url, content="rss"))
+                queries_done.append(qtext)
+                continue
+            cost = credit_cost(depth)
+            if not governor.can_spend(cost):
+                log.info("stop_queries_budget")
+                break
+            try:
+                hits = tavily_search(
+                    api_key=cfg.tavily.api_key,
+                    query=qtext,
+                    max_results=cfg.tavily.max_results,
+                    search_depth=depth,
+                )
+                governor.record_spend(cost)
+                summary["credits_spent"] = int(summary.get("credits_spent") or 0) + cost
+                all_hits.extend(hits)
+                queries_done.append(qtext)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("search_failed q=%s err=%s", qtext[:60], exc)
 
-    if cfg.brain.enabled:
+        clusters = _cluster_hits(all_hits, lane)
+        for name, url, snippets in clusters[:8]:
+            rejected = registry.get("rejected_research") or []
+            if any(
+                normalize_domain(r.get("url", "")) == normalize_domain(url) for r in rejected
+            ):
+                log.info("skip_known_rejected %s", url)
+                continue
+            v, esc_credits = evaluate_candidate(
+                session,
+                cfg,
+                target,
+                governor,
+                run_id=run_id,
+                lane=lane,
+                name=name,
+                url=url,
+                snippets=snippets,
+                known_sources=known,
+                initial_queries=queries_done,
+                dry_run=dry_run,
+            )
+            summary["credits_spent"] = int(summary.get("credits_spent") or 0) + esc_credits
+            summary["verdicts"].append({"name": name, "url": url, "verdict": v})
+
+        run.status = "ok"
+        run.detail = f"verdicts={len(summary['verdicts'])}"
+    except Exception as exc:  # noqa: BLE001 — mark run failed, continue other lanes
+        log.exception("run_target_lane_failed lane=%s: %s", lane, exc)
+        run.status = "error"
+        run.detail = str(exc)[:500]
+        summary["error"] = str(exc)
+    finally:
+        run.credits_spent = int(summary.get("credits_spent") or 0)
+        run.finished_at = datetime.now(timezone.utc)
+        session.commit()
+
+    if run.status == "ok" and cfg.brain.enabled:
         brain_append(
             api_url=cfg.brain.api_url,
             token=cfg.brain.token,
-            summary=f"scout {target.id}/{lane}: {len(summary['verdicts'])} decisions, credits={run.credits_spent}",
+            summary=(
+                f"scout {target.id}/{lane}: {len(summary['verdicts'])} decisions, "
+                f"credits={run.credits_spent}"
+            ),
             project=target.id,
         )
     return summary

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from service_scout.config import ScoutConfig, TargetConfig
@@ -21,7 +22,9 @@ from service_scout.tools.apprise_digest import send_apprise
 log = logging.getLogger(__name__)
 
 
-def agent_to_notion_verdict(v: AgentVerdict, *, forced: ScoutNotionVerdict | None = None) -> ScoutNotionVerdict:
+def agent_to_notion_verdict(
+    v: AgentVerdict, *, forced: ScoutNotionVerdict | None = None
+) -> ScoutNotionVerdict:
     if forced:
         return forced
     if v.verdict == "accept":
@@ -55,6 +58,39 @@ def apply_free_first_gates(
     return "accept"
 
 
+def _queue_digest(
+    session: Session,
+    *,
+    service_id: str,
+    title: str,
+    scout_verdict: str,
+    notion_page_id: str,
+    url: str,
+) -> None:
+    """Upsert one unflushed digest row per service_id (no duplicates)."""
+    existing = session.scalars(
+        select(DigestQueueItem).where(
+            DigestQueueItem.service_id == service_id,
+            DigestQueueItem.flushed == 0,
+        )
+    ).first()
+    if existing:
+        existing.title = title
+        existing.scout_verdict = scout_verdict
+        existing.notion_page_id = notion_page_id
+        existing.url = url
+        return
+    session.add(
+        DigestQueueItem(
+            service_id=service_id,
+            title=title,
+            scout_verdict=scout_verdict,
+            notion_page_id=notion_page_id,
+            url=url,
+        )
+    )
+
+
 def write_agdr(
     session: Session,
     *,
@@ -67,7 +103,9 @@ def write_agdr(
     constraints_checked: list,
     raw: str,
     validation_error: str,
+    commit: bool = False,
 ) -> None:
+    """Append AgDR. Caller commits after Notion succeeds unless commit=True."""
     session.add(
         AgentDecisionRecord(
             run_id=run_id,
@@ -81,7 +119,8 @@ def write_agdr(
             validation_error=(validation_error or "")[:2000],
         )
     )
-    session.commit()
+    if commit:
+        session.commit()
 
 
 def persist_decision(
@@ -104,18 +143,6 @@ def persist_decision(
     dry_run: bool = False,
 ) -> str | None:
     fingerprint = f"{service_id}|{url}"
-    write_agdr(
-        session,
-        run_id=run_id,
-        service_id=service_id,
-        fingerprint=fingerprint,
-        verdict=notion_verdict,
-        queries_run=queries_run,
-        tool_calls=tool_calls,
-        constraints_checked=constraints_checked,
-        raw=raw,
-        validation_error=validation_error,
-    )
 
     free_tier = agent.free_tier_summary if agent else None
     hook = agent.scoring_or_infra_hook if agent else None
@@ -142,15 +169,45 @@ def persist_decision(
     title = name or service_id
 
     if dry_run:
-        log.info("dry_run notion %s", notion_tool.dry_run_payload(title=title, body=body, verdict=notion_verdict))
+        log.info(
+            "dry_run notion %s",
+            notion_tool.dry_run_payload(title=title, body=body, verdict=notion_verdict),
+        )
+        write_agdr(
+            session,
+            run_id=run_id,
+            service_id=service_id,
+            fingerprint=fingerprint,
+            verdict=notion_verdict,
+            queries_run=queries_run,
+            tool_calls=tool_calls,
+            constraints_checked=constraints_checked,
+            raw=raw,
+            validation_error=validation_error,
+            commit=True,
+        )
         return None
 
     existing = session.get(NotionLink, service_id)
     page_id = existing.notion_page_id if existing else None
     if existing and cfg.notion.on_revisit == "skip":
         log.info("notion_skip_existing service_id=%s", service_id)
+        write_agdr(
+            session,
+            run_id=run_id,
+            service_id=service_id,
+            fingerprint=fingerprint,
+            verdict=notion_verdict,
+            queries_run=queries_run,
+            tool_calls=tool_calls,
+            constraints_checked=constraints_checked + ["notion_skip_existing"],
+            raw=raw,
+            validation_error=validation_error,
+            commit=True,
+        )
         return page_id
 
+    # Notion first — AgDR only after a successful write
     ds = target.notion_data_source or cfg.notion.roadmap_data_source
     page_id = notion_tool.create_or_update_page(
         cfg.notion,
@@ -170,14 +227,26 @@ def persist_decision(
     link.scout_verdict = notion_verdict
     link.last_updated = datetime.now(timezone.utc)
     session.merge(link)
-    session.add(
-        DigestQueueItem(
-            service_id=service_id,
-            title=title,
-            scout_verdict=notion_verdict,
-            notion_page_id=page_id or "",
-            url=url,
-        )
+    _queue_digest(
+        session,
+        service_id=service_id,
+        title=title,
+        scout_verdict=notion_verdict,
+        notion_page_id=page_id or "",
+        url=url,
+    )
+    write_agdr(
+        session,
+        run_id=run_id,
+        service_id=service_id,
+        fingerprint=fingerprint,
+        verdict=notion_verdict,
+        queries_run=queries_run,
+        tool_calls=tool_calls,
+        constraints_checked=constraints_checked,
+        raw=raw,
+        validation_error=validation_error,
+        commit=False,
     )
     session.commit()
 

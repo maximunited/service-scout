@@ -141,15 +141,22 @@ def create_or_update_page(
 
     with httpx.Client(timeout=30.0, headers=_headers(cfg.token)) as client:
         if existing_page_id and cfg.on_revisit == "update_existing":
-            # Update properties + append a paragraph
-            for attempt_props in ( {**props, **optional}, props):
+            props_ok = False
+            last_err = ""
+            for attempt_props in ({**props, **optional}, props):
                 r = client.patch(
                     f"https://api.notion.com/v1/pages/{existing_page_id}",
                     json={"properties": attempt_props},
                 )
                 if r.status_code < 300:
+                    props_ok = True
                     break
-            client.patch(
+                last_err = r.text[:500]
+                log.warning("notion_update_attempt_failed: %s", last_err)
+            if not props_ok:
+                raise RuntimeError(f"notion_update_failed: {last_err}")
+
+            r_children = client.patch(
                 f"https://api.notion.com/v1/blocks/{existing_page_id}/children",
                 json={
                     "children": [
@@ -163,6 +170,11 @@ def create_or_update_page(
                     ]
                 },
             )
+            if r_children.status_code >= 300:
+                raise RuntimeError(
+                    f"notion_append_failed: {r_children.text[:500]}"
+                )
+            log.info("notion_page_updated id=%s verdict=%s", existing_page_id, verdict)
             return existing_page_id
 
         # Create — try with optional props, fall back without
