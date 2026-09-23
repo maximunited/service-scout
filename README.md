@@ -34,11 +34,14 @@ python -m service_scout digest
 ## Design (short)
 
 - **Governor** enforces monthly Tavily + escalation caps (Cursor/MCP headroom reserved).
+- **Pre-Ollama classifier** rejects blogs, denylisted domains (e.g. TIKR, Quant Investing, Damodaran Substack), and UI-only terminals before spending LLM/escalation credits.
+- **Accept requires ingest evidence** — public REST/GraphQL, free API key limits, or scrapable public JSON — not a free web-terminal account or an FCF essay.
 - **Pydantic `AgentVerdict`** gate — invalid JSON never spends tools; retry at lower temperature; else `reject` + `invalid_agent_output`.
-- Incomplete research → Notion **Backlog / Raw** with `Scout verdict=needs_research`.
+- Incomplete research with API signal → Notion **Backlog / Raw** (`needs_research`); content-only → **Rejected**.
 - **`service_aliases`** dedupe by domain before Notion.
 - Gap registry: HTTP artifact → cache → `gaps.default.json`.
 - Multi-target via `targets[]` in config (PA first).
+- Optional **reviewer** second pass: set `autotune.reviewer_enabled: true` (rules-only; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
 ## License
 

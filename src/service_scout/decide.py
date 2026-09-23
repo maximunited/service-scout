@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from service_scout.classify import has_ingest_evidence, is_content_only_url, is_false_free_signal
 from service_scout.config import ScoutConfig, TargetConfig
 from service_scout.db import (
     AgentDecisionRecord,
@@ -38,22 +39,55 @@ def apply_free_first_gates(
     v: AgentVerdict,
     *,
     lane: str,
+    url: str = "",
+    title: str = "",
+    snippets: list[str] | None = None,
 ) -> ScoutNotionVerdict:
-    """Downgrade accept if free-first / hook gates fail."""
-    if v.verdict == "need_more":
-        return "needs_research"
+    """Downgrade accept if free-first / ingest / hook gates fail.
+
+    Accept requires machine-ingestible evidence (REST/GraphQL/JSON endpoint /
+    free API key / scrapable public JSON) — not a free web-terminal account
+    or an educational essay about FCF.
+    """
     if v.verdict == "reject":
         return "reject"
-    # accept
+
+    candidate_url = url or (v.url or "")
+    candidate_title = title or (v.name or "")
+    blob = " ".join(
+        [
+            candidate_title,
+            v.free_tier_summary or "",
+            v.scoring_or_infra_hook or "",
+            v.reject_reason or "",
+            *(snippets or []),
+        ]
+    )
+
+    # Blog / guide / primer → hard reject (do not soft-backlog forever).
+    if is_content_only_url(candidate_url, title=candidate_title):
+        return "reject"
+    if is_false_free_signal(blob) and not has_ingest_evidence(blob):
+        return "reject"
+
+    if v.verdict == "need_more":
+        # Soft research only when there is *some* ingest signal to chase.
+        if has_ingest_evidence(blob):
+            return "needs_research"
+        return "reject"
+
+    # accept path
     if not v.free_tier_summary:
-        return "needs_research"
+        return "needs_research" if has_ingest_evidence(blob) else "reject"
     if lane in ("market_data", "source_health") and not v.scoring_or_infra_hook:
-        return "needs_research"
+        return "needs_research" if has_ingest_evidence(blob) else "reject"
     if lane == "infra" and not v.scoring_or_infra_hook and not v.free_tier_summary:
         return "needs_research"
-    # paid-only keyword sniff
     ft = (v.free_tier_summary or "").lower()
     if "no free" in ft or "paid only" in ft or "paid-only" in ft:
+        return "reject"
+    # Free UI account / terminal without API contract → reject
+    if not has_ingest_evidence(blob):
         return "reject"
     return "accept"
 

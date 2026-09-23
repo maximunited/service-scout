@@ -1,13 +1,18 @@
 # Optional human overrides (copy to overrides.yaml).
+# Builtin denylist already rejects: tikr.com, quant-investing.com,
+# aswathdamodaran.substack.com (see service_scout.classify.DEFAULT_DENYLIST_DOMAINS).
 
-force_reject_domains: []
+force_reject_domains:
+  - tikr.com
+  - quant-investing.com
+  - aswathdamodaran.substack.com
 # - example-scam-api.com
 
 force_watch_vendors: []
 # - interesting-startup
 
 always_include_query_seeds: []
-# - "free equity options flow API 2026"
+# - "free equity options flow REST API JSON 2026"
 
 alias_merges: {}
 # "docs.example.com": "example.com"

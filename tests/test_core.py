@@ -43,9 +43,9 @@ def test_normalize_domain():
     assert normalize_domain("www.Foo.io") == "foo.io"
 
 
-def test_free_first_gates_needs_research_without_tier():
+def test_free_first_gates_reject_without_tier_or_ingest():
     v = AgentVerdict(verdict="accept", confidence=4, uncertainty=2, scoring_or_infra_hook="x")
-    assert apply_free_first_gates(v, lane="market_data") == "needs_research"
+    assert apply_free_first_gates(v, lane="market_data") == "reject"
 
 
 def test_free_first_gates_accept():
@@ -53,10 +53,42 @@ def test_free_first_gates_accept():
         verdict="accept",
         confidence=4,
         uncertainty=2,
-        free_tier_summary="500 req/day free",
+        free_tier_summary="REST API 500 req/day free",
         scoring_or_infra_hook="score_valuation",
     )
     assert apply_free_first_gates(v, lane="market_data") == "accept"
+
+
+def test_free_first_gates_reject_content_only_url():
+    v = AgentVerdict(
+        verdict="accept",
+        confidence=5,
+        uncertainty=1,
+        free_tier_summary="free essay",
+        scoring_or_infra_hook="fcf education",
+    )
+    assert (
+        apply_free_first_gates(
+            v,
+            lane="market_data",
+            url="https://aswathdamodaran.substack.com/p/fcf-primer",
+            title="Damodaran FCF primer",
+        )
+        == "reject"
+    )
+
+
+def test_free_first_gates_need_more_without_api_rejects():
+    v = AgentVerdict(verdict="need_more", confidence=2, uncertainty=4, why_more_search="limits?")
+    assert (
+        apply_free_first_gates(
+            v,
+            lane="market_data",
+            url="https://quant-investing.com/guides/fcf-yield",
+            title="FCF Yield guide",
+        )
+        == "reject"
+    )
 
 
 def test_gap_registry_default(tmp_path, monkeypatch):

@@ -30,9 +30,14 @@ Return ONLY a single JSON object (no markdown) matching this schema:
   "open_questions": ["..."]
 }
 Rules:
-- accept only if usable free path exists AND a clear scoring/infra hook is named.
+- accept ONLY if ALL are true:
+  (1) machine-ingestible free path: public REST/GraphQL, free API key with limits, OR scrapable public JSON pattern;
+  (2) clear scoring/infra hook named.
+- A free *web terminal / screener / dashboard account* is NOT an API — reject with reject_reason=ui_only_no_api.
+- Blogs, Substack, Medium, academy/guide/primer/tutorial essays are NOT data sources — reject with reject_reason=not_a_data_source (or content_only_no_api). Talking about FCF/cash flow does not make an article an API.
+- Reject marketing pages for paid screeners that only sell a free guide.
 - reject if paid-only, overlap with known sources, free tier too small, or no hook.
-- need_more only if truly missing free-tier numbers or critical facts; set why_more_search.
+- need_more ONLY when an API/endpoint likely exists but free-tier numbers or auth details are missing; set why_more_search. Prefer reject over endless needs_research for content-only hits.
 - Paraphrase; do not paste long copyrighted text.
 """
 

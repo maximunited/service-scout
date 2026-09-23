@@ -9,8 +9,9 @@
       "blocked_reason": null,
       "last_checked": null,
       "query_seeds": [
-        "free API cash flow quality earnings quality equity",
-        "free financial API FCF yield NI excluding NRI"
+        "free REST API cash flow quality FCF equity JSON",
+        "free financial JSON endpoint FCF yield NI excluding NRI API",
+        "public API free tier free cash flow fundamentals"
       ]
     },
     {
@@ -20,8 +21,8 @@
       "blocked_reason": null,
       "last_checked": null,
       "query_seeds": [
-        "free TASE API Israel stock fundamentals",
-        "Israeli mutual fund NAV public API free"
+        "free REST API TASE Israel stock fundamentals JSON",
+        "Israeli mutual fund NAV public API free tier endpoint"
       ]
     },
     {
@@ -31,7 +32,7 @@
       "blocked_reason": null,
       "last_checked": null,
       "query_seeds": [
-        "free API Canadian CDR underlying fundamentals mapping"
+        "free REST API Canadian CDR underlying fundamentals mapping JSON"
       ]
     },
     {
@@ -41,7 +42,7 @@
       "blocked_reason": null,
       "last_checked": null,
       "query_seeds": [
-        "free short interest API equities no paywall"
+        "free short interest REST API equities JSON free tier"
       ]
     }
   ],
@@ -66,6 +67,21 @@
       "id": "undervaluable",
       "url": "https://undervaluable.com/",
       "reason": "High overlap; API paid/locked; relative-val idea already implemented free"
+    },
+    {
+      "id": "damodaran_fcf_primer",
+      "url": "https://aswathdamodaran.substack.com/",
+      "reason": "Educational essay \u2014 not a machine-ingestible API (PA-387)"
+    },
+    {
+      "id": "quant_investing_fcf",
+      "url": "https://quant-investing.com/",
+      "reason": "Paid screener marketing / guide \u2014 no free feed (PA-393)"
+    },
+    {
+      "id": "tikr_terminal",
+      "url": "https://www.tikr.com/",
+      "reason": "UI terminal; free account only; no public API for ingest (PA-388)"
     }
   ],
   "infra_constraints": [
@@ -82,7 +98,7 @@
     },
     {
       "id": "upstash_l0",
-      "description": "Upstash-everywhere for L0 stock cache — free tier limits matter",
+      "description": "Upstash-everywhere for L0 stock cache \u2014 free tier limits matter",
       "status": "satisfied",
       "blocked_reason": null,
       "last_checked": null,
@@ -90,7 +106,7 @@
     },
     {
       "id": "oci_ampere",
-      "description": "cloud-ai is Ampere aarch64 — prefer aarch64-friendly images",
+      "description": "cloud-ai is Ampere aarch64 \u2014 prefer aarch64-friendly images",
       "status": "satisfied",
       "blocked_reason": null,
       "last_checked": null,
@@ -99,8 +115,8 @@
   ],
   "source_health_seeds": [
     "SimplyWallSt GraphQL API changes free snowflake",
-    "Yahoo Finance rate limit free alternative fundamentals 2026",
-    "Finviz scraping Cloudflare block free tier",
-    "TipRanks free API limits Smart Score"
+    "Yahoo Finance rate limit free alternative fundamentals REST API 2026",
+    "Finviz scraping Cloudflare block free JSON endpoint",
+    "TipRanks free API limits Smart Score REST"
   ]
 }

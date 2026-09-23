@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from service_scout.agent import hits_to_snippets, triage_with_retry
+from service_scout.classify import classify_candidate
 from service_scout.config import ScoutConfig, TargetConfig
 from service_scout.db import NotionLink, Run
 from service_scout.decide import apply_free_first_gates, persist_decision
@@ -16,6 +17,7 @@ from service_scout.gaps import load_gap_registry
 from service_scout.governor import Governor
 from service_scout.lanes import run_lane
 from service_scout.models import AgentVerdict, SearchHit
+from service_scout.reviewer import ReviewerConfig, review_before_notion
 from service_scout.tools.apprise_digest import brain_append
 from service_scout.tools.tavily import credit_cost, tavily_search
 
@@ -72,16 +74,26 @@ def evaluate_candidate(
 ) -> tuple[str, int]:
     """Return (notion_verdict_or_skip, tavily_credits_spent_in_this_candidate)."""
     credits_here = 0
-    if is_force_rejected(url, cfg.overrides):
+    sid = resolve_service_id(session, name=name, url=url, overrides=cfg.overrides)
+
+    # Pre-Ollama hard rejects (denylist / blog / UI-only) — save Tavily escalation + LLM.
+    pre = classify_candidate(
+        url, title=name, snippets=snippets, overrides=cfg.overrides
+    )
+    if is_force_rejected(url, cfg.overrides) or pre.skip_ollama:
+        reason = (
+            "force_reject_domain"
+            if is_force_rejected(url, cfg.overrides)
+            else (pre.reason or "not_a_data_source")
+        )
         forced = AgentVerdict(
             name=name,
             url=url,
             verdict="reject",
             confidence=5,
             uncertainty=1,
-            reject_reason="force_reject_domain",
+            reject_reason=reason,
         )
-        sid = resolve_service_id(session, name=name, url=url, overrides=cfg.overrides)
         persist_decision(
             session,
             cfg,
@@ -95,14 +107,13 @@ def evaluate_candidate(
             agent=forced,
             queries_run=initial_queries,
             tool_calls=[],
-            constraints_checked=["force_reject_domain"],
+            constraints_checked=["pre_ollama_classify", reason],
             raw="{}",
             validation_error="",
             dry_run=dry_run,
         )
         return "reject", credits_here
 
-    sid = resolve_service_id(session, name=name, url=url, overrides=cfg.overrides)
     existing = session.get(NotionLink, sid)
     if existing and existing.scout_verdict == "reject" and cfg.notion.on_revisit == "skip":
         log.info("skip_rejected service_id=%s", sid)
@@ -205,12 +216,43 @@ def evaluate_candidate(
                         agent = agent2
                     rounds += 1
 
-    # Force decide if still need_more
-    notion_verdict = apply_free_first_gates(agent, lane=lane)
-    if agent.verdict == "need_more":
-        notion_verdict = "needs_research"
+    # Free-first + ingest-evidence gates (content-only → reject, not soft backlog)
+    notion_verdict = apply_free_first_gates(
+        agent,
+        lane=lane,
+        url=url,
+        title=name,
+        snippets=snippets,
+    )
 
-    constraints = ["free_tier_exists", "scoring_hook_named", "schema_gate"]
+    # Optional independent second-pass reviewer (off by default).
+    review_cfg = ReviewerConfig(
+        enabled=bool((cfg.autotune or {}).get("reviewer_enabled", False)),
+        use_ollama=bool((cfg.autotune or {}).get("reviewer_use_ollama", False)),
+    )
+    review = review_before_notion(
+        url=url,
+        title=name,
+        snippets=snippets,
+        agent=agent,
+        proposed=notion_verdict,
+        overrides=cfg.overrides,
+        cfg=review_cfg,
+    )
+    if review.verdict is not None:
+        notion_verdict = review.verdict
+        if agent.reject_reason is None and review.reason:
+            agent.reject_reason = review.reason
+
+    constraints = [
+        "free_tier_exists",
+        "scoring_hook_named",
+        "schema_gate",
+        "ingest_evidence",
+        "pre_ollama_classify",
+    ]
+    if review_cfg.enabled:
+        constraints.append(f"reviewer:{review.reason}")
     persist_decision(
         session,
         cfg,
