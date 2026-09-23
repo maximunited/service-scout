@@ -1,0 +1,10 @@
+[Unit]
+Description=Service Scout infra on 1st of month 09:00 UTC
+
+[Timer]
+OnCalendar=*-*-01 09:00:00 UTC
+Persistent=true
+Unit=service-scout-infra.service
+
+[Install]
+WantedBy=timers.target

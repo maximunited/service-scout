@@ -1,0 +1,13 @@
+# Optional human overrides (copy to overrides.yaml).
+
+force_reject_domains: []
+# - example-scam-api.com
+
+force_watch_vendors: []
+# - interesting-startup
+
+always_include_query_seeds: []
+# - "free equity options flow API 2026"
+
+alias_merges: {}
+# "docs.example.com": "example.com"

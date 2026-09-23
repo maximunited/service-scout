@@ -1,0 +1,10 @@
+[Unit]
+Description=Service Scout Friday digest timer
+
+[Timer]
+OnCalendar=Fri *-*-* 18:00:00 UTC
+Persistent=true
+Unit=service-scout-digest.service
+
+[Install]
+WantedBy=timers.target

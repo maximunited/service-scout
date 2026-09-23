@@ -1,0 +1,11 @@
+[Unit]
+Description=Service Scout lane run
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/service-scout
+EnvironmentFile=-/home/ubuntu/stack/secrets/scout.env
+ExecStart=/home/ubuntu/service-scout/.venv/bin/python -m service_scout run
+Nice=10

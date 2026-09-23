@@ -1,0 +1,19 @@
+# Optional merge into oci-n8n stack/docker-compose.yml
+
+services:
+  service-scout:
+    build:
+      context: /home/ubuntu/service-scout
+      dockerfile: Dockerfile
+    container_name: service-scout
+    env_file:
+      - ./secrets/scout.env
+    volumes:
+      - /home/ubuntu/service-scout/config.yaml:/app/config.yaml:ro
+      - /home/ubuntu/service-scout/data:/app/data
+    working_dir: /app
+    # Timers on host invoke: docker exec service-scout python -m service_scout run ...
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+    networks:
+      - default

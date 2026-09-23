@@ -1,0 +1,121 @@
+# Copy to config.yaml (gitignored). Prefer env overrides for secrets.
+
+database:
+  # Prefer OCI Postgres own DB — never Neon / portfolio_advisor.
+  # url: "postgresql+psycopg://scout:CHANGE_ME@portfolio-standby-db:5432/service_scout"
+  sqlite_path: "data/scout.db"
+
+schedule:
+  market_health_cron: "0 9 * * 1"
+  infra_cron: "0 9 1 * *"
+  digest_cron: "0 18 * * 5"
+
+tavily:
+  api_key: "" # or env TAVILY_API_KEY
+  monthly_credit_budget: 50
+  reserved_for_cursor_mcp: 200
+  search_depth: basic # basic | advanced — never research unless allow_research_endpoint
+  max_results: 5
+  per_run:
+    market_data: 3
+    source_health: 3
+    infra: 2
+  escalation:
+    enabled: true
+    monthly_extra_searches: 4
+    min_uncertainty: 3
+    require_reason: true
+    max_extra_per_candidate: 1
+    allow_advanced_depth: false
+    allow_research_endpoint: false
+    max_suggested_queries: 2
+
+ollama:
+  base_url: "" # e.g. https://alter-ai.example/v1 — or OLLAMA_BASE_URL
+  model: "" # or OLLAMA_MODEL
+  api_token: "" # optional Bearer — or OLLAMA_API_TOKEN
+  temperature: 0.2
+  retry_temperature: 0.3
+  json_repair_retries: 1
+
+notion:
+  token: "" # or NOTION_TOKEN
+  # Roadmap data source id (collection://… or bare UUID)
+  roadmap_data_source: "2644702a-c1f7-4fea-8fe9-b0c5d68d9267"
+  on_revisit: update_existing # update_existing | skip
+  properties:
+    status: Status
+    refinement: Refinement
+    source: Source
+    scout_verdict: "Scout verdict"
+    scout_lane: "Scout lane"
+    scout_service_id: "Scout service_id"
+    free_tier: "Free tier"
+    confidence: Confidence
+  on_accept:
+    status: Backlog
+    refinement: Raw
+  on_needs_research:
+    status: Backlog
+    refinement: Raw
+  on_reject:
+    status: Rejected
+    refinement: Raw
+  source_value: Agent
+  priority_default: P3
+
+digest:
+  enabled: true
+  apprise_urls: [] # e.g. ["ntfy://ntfy.sh/your-topic"]
+  include_rejects: false
+  include_needs_research: true
+  max_items: 20
+  immediate_accept_min_confidence: 5 # 1-5; only fire if >= this
+
+governor:
+  max_tool_rounds: 2
+  min_uncertainty_to_escalate: 3
+  commit_threshold: 3 # confidence below this triggers one branch retry
+
+dedupe:
+  query_notion_statuses:
+    - Backlog
+    - In Progress
+    - Done
+    - Deferred
+    - Rejected
+
+gaps:
+  source_url: "" # optional HTTP(S) artifact; empty = use default + cache
+  cache_path: "data/gaps_cache.json"
+  default_path: "gaps.default.json"
+
+brain:
+  enabled: false
+  api_url: "" # e.g. https://brain.maximai.duckdns.org/v1/memory
+  token: "" # or BRAIN_API_TOKEN
+
+autotune:
+  enabled: false
+
+lanes:
+  market_data:
+    enabled: true
+  source_health:
+    enabled: true
+  infra:
+    enabled: true
+    free_tier_only: true
+    prefer_rss: true
+    rss_feeds:
+      - "https://news.ycombinator.com/rss"
+      - "https://lobste.rs/rss"
+
+targets:
+  - id: portfolio-advisor
+    gaps_url: "" # override gaps.source_url per target
+    notion_data_source: "" # empty = use global notion.roadmap_data_source
+    lanes:
+      - market_data
+      - source_health
+      - infra

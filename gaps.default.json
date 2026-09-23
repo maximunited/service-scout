@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "project": "portfolio-advisor",
+  "scoring_gaps": [
+    {
+      "id": "cash_earnings_quality",
+      "description": "Cash-backed earnings / NI vs FCF quality overlay for cheap-PE names",
+      "status": "open",
+      "blocked_reason": null,
+      "last_checked": null,
+      "query_seeds": [
+        "free API cash flow quality earnings quality equity",
+        "free financial API FCF yield NI excluding NRI"
+      ]
+    },
+    {
+      "id": "tase_israel_coverage",
+      "description": "Better free coverage for TASE / Israeli funds beyond Yahoo+BizPortal",
+      "status": "open",
+      "blocked_reason": null,
+      "last_checked": null,
+      "query_seeds": [
+        "free TASE API Israel stock fundamentals",
+        "Israeli mutual fund NAV public API free"
+      ]
+    },
+    {
+      "id": "cdr_fundamentals",
+      "description": "Reliable fundamentals for CDR wrappers (avoid Yahoo per-unit bugs)",
+      "status": "open",
+      "blocked_reason": null,
+      "last_checked": null,
+      "query_seeds": [
+        "free API Canadian CDR underlying fundamentals mapping"
+      ]
+    },
+    {
+      "id": "short_interest_alt",
+      "description": "Free short-interest alternative when Finviz/Yahoo thin",
+      "status": "open",
+      "blocked_reason": null,
+      "last_checked": null,
+      "query_seeds": [
+        "free short interest API equities no paywall"
+      ]
+    }
+  ],
+  "known_sources": [
+    "yahoo",
+    "finviz",
+    "simplywall",
+    "tipranks",
+    "marketbeat",
+    "gurufocus",
+    "finnhub",
+    "fred",
+    "bea",
+    "simfin",
+    "tiingo",
+    "openfigi",
+    "tradingview",
+    "stockanalysis"
+  ],
+  "rejected_research": [
+    {
+      "id": "undervaluable",
+      "url": "https://undervaluable.com/",
+      "reason": "High overlap; API paid/locked; relative-val idea already implemented free"
+    }
+  ],
+  "infra_constraints": [
+    {
+      "id": "neon_cu_limit",
+      "description": "Neon free CU hours exhaust; Scout must never use Neon",
+      "status": "open",
+      "blocked_reason": null,
+      "last_checked": null,
+      "query_seeds": [
+        "free tier Postgres CU hours generous alternative to Neon 2026",
+        "self-hosted Postgres free managed alternative EU"
+      ]
+    },
+    {
+      "id": "upstash_l0",
+      "description": "Upstash-everywhere for L0 stock cache — free tier limits matter",
+      "status": "satisfied",
+      "blocked_reason": null,
+      "last_checked": null,
+      "query_seeds": []
+    },
+    {
+      "id": "oci_ampere",
+      "description": "cloud-ai is Ampere aarch64 — prefer aarch64-friendly images",
+      "status": "satisfied",
+      "blocked_reason": null,
+      "last_checked": null,
+      "query_seeds": []
+    }
+  ],
+  "source_health_seeds": [
+    "SimplyWallSt GraphQL API changes free snowflake",
+    "Yahoo Finance rate limit free alternative fundamentals 2026",
+    "Finviz scraping Cloudflare block free tier",
+    "TipRanks free API limits Smart Score"
+  ]
+}
